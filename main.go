@@ -13,9 +13,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	discovery "k8s.io/client-go/discovery"
@@ -51,7 +51,7 @@ func main() {
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 	go simulateOperator(c, worker.Name, wg, "Operator 1 > ")
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
 	go simulateOperator(c, worker.Name, wg, "Operator 2 > ")
 	wg.Wait()
 }
@@ -99,6 +99,8 @@ func simulateOperator(c client.Client, workerName string, wg *sync.WaitGroup, pr
 	for {
 		if err := c.Get(context.Background(), client.ObjectKeyFromObject(nm), nm); err != nil {
 			logger.Printf("Failed to get NodeMaintenance CR: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
 		printWorkerStatus(c, workerName)
@@ -149,32 +151,23 @@ func checkIfNMOInstalled(cfg *rest.Config) {
 }
 
 func getWorker(c client.Client, name string) corev1.Node {
-	req, err := labels.NewRequirement("node-role.kubernetes.io/worker", selection.Exists, []string{})
-	if err != nil {
-		log.Fatalf("Failed to create a node selector requirement: %+v\n", err)
-	}
-
-	selector := labels.NewSelector()
-	selector.Add(*req)
-
-	nodes := &corev1.NodeList{}
-	err = c.List(context.Background(), nodes, &client.ListOptions{LabelSelector: selector})
-
-	if err != nil {
-		log.Fatalf("Failed to list nodes: %+v\n", err)
-	}
-	if len(nodes.Items) == 0 {
-		log.Fatalln("Discovered 0 workers")
+	listOpt := &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{"node-role.kubernetes.io/worker": ""}),
 	}
 
 	if name != "" {
-		for _, n := range nodes.Items {
-			if n.Name == name {
-				return n
-			}
-		}
-		log.Fatalf("Could not find node %s\n", name)
-		return corev1.Node{}
+		listOpt.FieldSelector = fields.OneTermEqualSelector("metadata.name", name)
+	}
+
+	nodes := &corev1.NodeList{}
+	if err := c.List(context.Background(), nodes, listOpt); err != nil {
+		log.Fatalf("Failed to list nodes: %+v\n", err)
+	}
+	if len(nodes.Items) == 0 {
+		log.Fatalln("Discovered 0 workers.")
+	}
+	if name != "" && len(nodes.Items) != 1 {
+		log.Fatalf("Discovered %v workers, but expected 1\n", len(nodes.Items))
 	}
 
 	return nodes.Items[0]
