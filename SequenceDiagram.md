@@ -43,7 +43,8 @@ node ->> node: Removes systemd inhibition lock
 note over NMO,node: Reboot is allowed
 
 alt Operator reboots node
-  Operator ->> node: Creates transient systemd unit
+  Operator ->> API: Requests a reboot from a node
+  API ->> node: Forwards the request
   node ->> node: Reboot
   note over Operator, node: Node reboots
   Operator ->> API: Starts and checks NM CRs
